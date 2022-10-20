@@ -18,15 +18,19 @@ class ZarrConverter(asdf.extension.Converter):
 
 
         if isinstance(obj.store, zarr.storage.DirectoryStore):
+            # For a DirectoryStore use a file://<filename> source
             zarray = json.loads(obj.store['.zarray'])
             return {'source': f'file://{obj.chunk_store.path}', '.zarray': zarray}
         elif isinstance(obj.store, store.InternalStore):
-            # need to know which blocks to use
+            # For an InteralStore use a blocks://<block_slice> source
+            # the block slice are the start (inclusive) and end (exclusive)
+            # block indices in which chunks are stored.
+            # A source of blocks://0:5 stores chunks in blocks 0, 1, 2, 3, 4
             block_slice = obj.store.block_slice
             source = f'blocks://{block_slice[0]}:{block_slice[1]}'
             return {'.zarray': obj.store['.zarray'], 'source': source}
 
-        raise NotImplementedError(f"zarr.store type {type(obj.store)} not supported")
+        raise NotImplementedError(f"{self.__class__}: zarr.store type {type(obj.store)} not supported")
 
     def from_yaml_tree(self, node, tag, ctx):
         #import pdb; pdb.set_trace()
@@ -55,3 +59,4 @@ class ZarrConverter(asdf.extension.Converter):
                                                  zarray=zarray,
                                                  block_slice=block_slice)
             return zarr.open(store=internal_store)
+        raise NotImplementedError(f"{self.__class__}: source {source} not supported")

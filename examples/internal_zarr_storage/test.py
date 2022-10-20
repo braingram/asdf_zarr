@@ -24,6 +24,8 @@ def write_context(asdf_file, filename, *args, **kwargs):
         # yield the file pointer
         yield fp
 
+        # TODO write all unwritten chunks with fill values
+
         # TODO release file pointer from blocks?
 
 
