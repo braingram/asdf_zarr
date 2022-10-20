@@ -223,3 +223,15 @@ class InternalStore(zarr.storage.KVStore):
             self._zarray = None
             return
         raise NotImplementedError("cannot delete chunks")
+
+    def write_remaining_blocks(self):
+        for block in self._block_kv_store.values():
+            if not block._written:
+                # TODO what is a sensible default? or should we throw an
+                # exception if no fill value is defined
+                if 'fill_value' not in self._zarray:
+                    raise Exception(f"Unwritten block {block=} and undefined fill_value")
+                v = self._zarray['fill_value']
+                data = numpy.empty(self._zarray['chunks'], self._zarray['dtype'])
+                data[:] = v
+                block.write_chunk(data)

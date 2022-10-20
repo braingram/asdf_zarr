@@ -13,11 +13,3 @@ Example uses can be found in [examples](examples) including:
 The external storage example can be run with an unmodified asdf (however
 support for internal storage would need to be removed to allow this
 extension to work).
-
-Known issues:
-- fill_value and unwritten chunks: If a chunk is not written after
-creation the block will be uninitialized and in a bad state. It may be
-preferrable to use the fill_value (or a default) to write any unwritten
-blocks prior to release of the write context or to write all chunks
-with the fill value on creation (which would incur a potentially
-large io cost).

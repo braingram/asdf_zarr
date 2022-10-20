@@ -37,8 +37,7 @@ if __name__ == '__main__':
 
     # make a zarray using this storage (this can't yet be used for writing)
     # creation of the array will make the .zarray file but won't create chunks
-    af['my_zarr'] = zarr.zeros(store=store, shape=100, chunks=10,
-                               dtype='i4', compressor=None)
+    af['my_zarr'] = zarr.create(100, store=store, chunks=10, dtype='i4', compressor=None, fill_value=42)
 
     # start a write context that will open a file (needs to be seekable)
     # and allow writing/reading chunks of data as blocks inside the asdf file
@@ -46,9 +45,10 @@ if __name__ == '__main__':
         # now the array can be modified as a destination file is open for writing
         a = af['my_zarr']
         # write to each chunk
-        for i in range(10):
+        for i in range(5):
             a[i * 10] = i
             assert a[i * 10] == i
+        store.write_remaining_blocks()
 
 
     # now let's open up the file (which we can read like a normal asdf file)
@@ -56,6 +56,9 @@ if __name__ == '__main__':
     a = af['my_zarr']
 
     # and check the data was written
-    for i in range(10):
+    for i in range(5):
         assert a[i * 10] == i
+    # also check unwritten blocks were written
+    for i in range(5, 10):
+        assert a[i * 10] == 42
     print("all good!")
