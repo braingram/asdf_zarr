@@ -9,33 +9,22 @@ import zarr
 
 
 @contextmanager
-def write_context(asdf_file, filename):
+def write_context(asdf_file, filename, *args, **kwargs):
+    """
+    Use a context manager to allow the file to stay open so chunks
+    can be written to the blocks inside the asdf file
+    """
     with open(filename, mode='bw+') as fp:
-        # convert to generic_io?
+        # convert to generic_io
+        # TODO map modes, only certain ones (possibly rw) are supported
         fp = asdf.generic_io.get_file(fp, mode='rw')
 
-        asdf_file.write_to(fp)
-
-        # # TODO currently ignores pad_blocks
-        # # write tree
-        # # this will trigger to_yaml_tree for any zarrays which MUST not yet
-        # # have written data
-        # # at this point a valid file pointer exists and block indicies
-        # # should be possible to assign
-        # asdf_file._write_tree(fp)
-
-        # # write all 'simple' blocks
-        # asdf_file._write_internal_blocks_serial(fp)
-        # # TODO does uri require the generic_io class?
-        # asdf_file._write_external_blocks_serial(fp.uri)
-
-        # # TODO? assign the file pointer to the chunked array storage
+        asdf_file.write_to(fp, *args, **kwargs)
 
         # yield the file pointer
         yield fp
 
-        # # write block index TODO make this optional?
-        # asdf_file._write_block_index(fp, asdf_file)
+        # TODO release file pointer from blocks?
 
 
 if __name__ == '__main__':
