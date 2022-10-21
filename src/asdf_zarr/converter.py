@@ -7,8 +7,6 @@ class ZarrConverter(asdf.extension.Converter):
     types = ["zarr.core.Array"]
 
     def to_yaml_tree(self, obj, tags, ctx):
-        #import pdb; pdb.set_trace()
-
         # defer import
         import json
 
@@ -29,12 +27,20 @@ class ZarrConverter(asdf.extension.Converter):
             block_slice = obj.store.block_slice
             source = f'blocks://{block_slice[0]}:{block_slice[1]}'
             return {'.zarray': obj.store['.zarray'], 'source': source}
+        elif isinstance(obj.store, zarr.storage.FSStore):
+            # TODO at the moment only s3 is supported
+            source = f's3://{obj.store.path}'
+
+            # read .zarray from store
+            zarray = json.loads(obj.store['.zarray'])
+
+            # TODO other options (client_kwargs, etc)
+            client_kwargs = obj.store.fs.client_kwargs
+            return {'source': source, '.zarray': zarray, 'client_kwargs': client_kwargs}
 
         raise NotImplementedError(f"{self.__class__}: zarr.store type {type(obj.store)} not supported")
 
     def from_yaml_tree(self, node, tag, ctx):
-        #import pdb; pdb.set_trace()
-
         # defer import
         import copy
         import zarr
@@ -59,4 +65,12 @@ class ZarrConverter(asdf.extension.Converter):
                                                  zarray=zarray,
                                                  block_slice=block_slice)
             return zarr.open(store=internal_store)
+        elif source_type == 's3':
+            # use fsspec to load an s3 store
+            # TODO other options like separator, etc
+            meta_store = {'.zarray': copy.deepcopy(node['.zarray'])}
+            kwargs = {}
+            if 'client_kwargs' in node:
+                kwargs['client_kwargs'] = node['client_kwargs']
+            return zarr.open(store=meta_store, chunk_store=zarr.storage.FSStore(source, **kwargs))
         raise NotImplementedError(f"{self.__class__}: source {source} not supported")
