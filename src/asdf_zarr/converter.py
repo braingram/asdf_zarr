@@ -46,7 +46,7 @@ class ZarrConverter(asdf.extension.Converter):
             block_indicies = []
             for chunk_key in storage.iter_chunk_keys(zarray):
                 block = asdf.block.Block(
-                    array_storage="internal", memmap=False, lazy_load=False, cache_data=False)
+                    array_storage="internal", memmap=False, lazy_load=True, cache_data=False)
 
                 # configure the new block
                 block.output_compression = None
@@ -60,7 +60,7 @@ class ZarrConverter(asdf.extension.Converter):
                     def write(fd):
                         # fetch data from store
                         with store_ref() as store:
-                            print(f"fetching data for chunk {chunk_key}")
+                            #print(f"fetching data for chunk {chunk_key}")
                             # TODO handle fill_value here
                             if chunk_key in store:
                                 data = store[chunk_key]
@@ -98,6 +98,8 @@ class ZarrConverter(asdf.extension.Converter):
     def from_yaml_tree(self, node, tag, ctx):
         # defer import
         import copy
+        import warnings
+
         import zarr
 
         from . import storage
@@ -125,6 +127,19 @@ class ZarrConverter(asdf.extension.Converter):
             zarray = copy.deepcopy(node['.zarray'])
             block_slice = [int(i) for i in source_info.split(':')]
             blocks = ctx.block_manager._internal_blocks[block_slice[0]:block_slice[1]]
+
+            # setup blocks
+            for block in blocks:
+                if not block._lazy_load:
+                    warnings.warn(
+                        f"{self._class__} found a block with lazy_load==False " +
+                        "this can result in reading the entire zarr array into memory "
+                        "and should be avoided")
+
+                block._lazy_load = True
+                block._should_memmap = False
+                block._cache_data = False
+
             internal_store = storage.InternalStore(zarray, blocks)
             return zarr.open(store=internal_store)
         raise NotImplementedError(f"{self.__class__}: source {source} not supported")
