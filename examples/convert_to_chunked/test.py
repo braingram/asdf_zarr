@@ -9,30 +9,11 @@ import numpy
 import zarr
 
 
+raise Exception("Requires update!")
+
 input_filename = 'input.fits'
 arrays_to_chunk = ['con', 'data']
 chunks = [1000, 1000]
-
-
-@contextmanager
-def write_context(asdf_file, filename, *args, **kwargs):
-    """
-    Use a context manager to allow the file to stay open so chunks
-    can be written to the blocks inside the asdf file
-    """
-    with open(filename, mode='bw+') as fp:
-        # convert to generic_io
-        # TODO map modes, only certain ones (possibly rw) are supported
-        fp = asdf.generic_io.get_file(fp, mode='rw')
-
-        asdf_file.write_to(fp, *args, **kwargs)
-
-        # yield the file pointer
-        yield fp
-
-        # TODO write all unwritten chunks with fill values
-
-        # TODO release file pointer from blocks?
 
 
 if __name__ == '__main__':
