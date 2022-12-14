@@ -1,5 +1,5 @@
 import asdf
-
+import numpy
 
 
 class ZarrConverter(asdf.extension.Converter):
@@ -39,6 +39,8 @@ class ZarrConverter(asdf.extension.Converter):
         if use_internal_store:
             # TODO verify settings are compatible
             zarray = json.loads(obj.store['.zarray'])
+            if zarray.get('compressor', None) != None:
+                raise NotImplementedError("Compression for zarr arrays in asdf is not supported")
 
             n_bytes_per_chunk = storage.chunk_size(zarray)
 
@@ -51,6 +53,7 @@ class ZarrConverter(asdf.extension.Converter):
                 # configure the new block
                 block.output_compression = None
                 block._used = True
+                # TODO this does not account for compression
                 block._data_size = block._size = n_bytes_per_chunk
 
                 # set up the block to return the correct chunk data when write is called
@@ -60,12 +63,12 @@ class ZarrConverter(asdf.extension.Converter):
                     def write(fd):
                         # fetch data from store
                         with store_ref() as store:
-                            #print(f"fetching data for chunk {chunk_key}")
-                            # TODO handle fill_value here
                             if chunk_key in store:
                                 data = store[chunk_key]
                             else:
-                                raise Exception("Fill values are not yet supported")
+                                # TODO handle fill_value here
+                                # make a filler array
+                                data = storage.make_filled_chunk(zarray)
                         block.write_data(fd, numpy.frombuffer(data, dtype='uint8'))
                     block.write = write
 

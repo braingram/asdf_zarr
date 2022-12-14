@@ -7,6 +7,12 @@ import numpy
 import zarr
 
 
+def make_filled_chunk(zarray):
+    arr = numpy.empty(zarray['chunks'], zarray['dtype'])
+    arr[:] = zarray['fill_value']
+    return arr
+
+
 def chunk_size(zarray):
     """Compute the size, in bytes, of a single chunk"""
     dt = numpy.dtype(zarray['dtype'])
