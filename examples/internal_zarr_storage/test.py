@@ -18,8 +18,8 @@ if __name__ == '__main__':
         shutil.rmtree(tmp_dir)
     my_zarr = zarr.create(
         store=store, shape=100, chunks=10, dtype='i4',
-        compressor=None)
-    for i in range(10):
+        compressor=None, fill_value=42)
+    for i in range(5):
         my_zarr[i * 10] = i
 
     # assign it to the asdf tree
@@ -39,13 +39,27 @@ if __name__ == '__main__':
     # now let's open up the file (which we can read like a normal asdf file)
     print(f"Opening asdf file at {fn}")
     af = asdf.open(fn)
-
-    # and check the data was written
     print("Checking zarr data")
     a = af['my_zarr']
-    for i in range(10):
+    for i in range(5):
         assert a[i * 10] == i
     # also check unwritten blocks were written
-    #for i in range(5, 10):
-    #    assert a[i * 10] == 42
+    for i in range(5, 10):
+        assert a[i * 10] == 42
+    af.close()
+
+    print("Checking writing")
+    af = asdf.open(fn, mode='rw')
+    a = af['my_zarr']
+    a[5] = 26
+    assert a[5] == 26
+    af.close()
+
+    print("Checking write was flushed to disk")
+    af = asdf.open(fn, mode='r')
+    a = af['my_zarr']
+    assert a[5] == 26
+    af.close()
+
     print("all good!")
+

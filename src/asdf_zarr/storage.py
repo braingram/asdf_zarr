@@ -57,15 +57,19 @@ class InternalStore(zarr.storage.KVStore):
         self._block_kv_store = {}
 
         # TODO check for no compression and other unsupported features
-        if self._zarray['compressor'] is not None:
+        if self._zarray.get('compressor', None) is not None:
             raise NotImplementedError(
-                f"{self.__class__} only supports uncompressed arrays")
+                f"{self.__class__} does not support compressor")
+        if self._zarray.get('filters', None) is not None:
+            raise NotImplementedError(
+                f"{self.__class__} does not support filters")
 
         for (chunk_key, block) in zip(iter_chunk_keys(self._zarray), self._blocks):
             self._block_kv_store[chunk_key] = block
 
     def _get_chunk(self, key):
         """Given a zarr chunk key, look up and read the block"""
+        print(f"_get_chunk {key=}")
         # look up the block
         block = self._block_kv_store[key]
         # read block
@@ -73,10 +77,9 @@ class InternalStore(zarr.storage.KVStore):
 
     def _set_chunk(self, key, value):
         """Given a zarr chunk key, look up and write to the block"""
+        print(f"_set_chunk {key=}")
         block = self._block_kv_store[key]
-        # TODO implement writing
-        raise NotImplementedError(f"{self.__class__} does not support writing")
-        #block.write_data(value)
+        block.rewrite_data(numpy.frombuffer(value, dtype='uint8'))
 
     def __getitem__(self, key):
         if key == '.zgroup':

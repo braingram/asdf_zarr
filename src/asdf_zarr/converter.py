@@ -40,7 +40,9 @@ class ZarrConverter(asdf.extension.Converter):
             # TODO verify settings are compatible
             zarray = json.loads(obj.store['.zarray'])
             if zarray.get('compressor', None) != None:
-                raise NotImplementedError("Compression for zarr arrays in asdf is not supported")
+                raise NotImplementedError("zarr array compressors are not supported in asdf")
+            if zarray.get('filters', None) != None:
+                raise NotImplementedError("zarr array filters are not supported in asdf")
 
             n_bytes_per_chunk = storage.chunk_size(zarray)
 
