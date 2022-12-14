@@ -69,7 +69,7 @@ class InternalStore(zarr.storage.KVStore):
 
     def _get_chunk(self, key):
         """Given a zarr chunk key, look up and read the block"""
-        print(f"_get_chunk {key=}")
+        #print(f"_get_chunk {key=}")
         # look up the block
         block = self._block_kv_store[key]
         # read block
@@ -77,7 +77,7 @@ class InternalStore(zarr.storage.KVStore):
 
     def _set_chunk(self, key, value):
         """Given a zarr chunk key, look up and write to the block"""
-        print(f"_set_chunk {key=}")
+        #print(f"_set_chunk {key=}")
         block = self._block_kv_store[key]
         block.rewrite_data(numpy.frombuffer(value, dtype='uint8'))
 
@@ -88,7 +88,7 @@ class InternalStore(zarr.storage.KVStore):
             if self._zarray is None:
                 raise KeyError(".zarray does not exist")
             else:
-                return self._zarray
+                return json.dumps(self._zarray)
         return self._get_chunk(key)
 
     def __setitem__(self, key, value):

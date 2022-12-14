@@ -53,6 +53,7 @@ if __name__ == '__main__':
     a = af['my_zarr']
     a[5] = 26
     assert a[5] == 26
+    #af.update()  # this will trigger rewriting the tree
     af.close()
 
     print("Checking write was flushed to disk")

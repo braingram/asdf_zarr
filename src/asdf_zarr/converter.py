@@ -32,8 +32,12 @@ class ZarrConverter(asdf.extension.Converter):
 
         from . import storage
 
+        if obj.chunk_store is not None:
+            chunk_store = obj.chunk_store
+        else:
+            chunk_store = obj.store
         use_internal_store = (
-            isinstance(obj.store, storage.InternalStore) or
+            isinstance(chunk_store, storage.InternalStore) or
             getattr(obj, 'array_storage', '') == 'internal')
 
         if use_internal_store:
@@ -49,14 +53,41 @@ class ZarrConverter(asdf.extension.Converter):
             # make blocks for data
             block_indicies = []
             for chunk_key in storage.iter_chunk_keys(zarray):
-                block = asdf.block.Block(
-                    array_storage="internal", memmap=False, lazy_load=True, cache_data=False)
+                # TODO handle zarr arrays with chunk_store == InternalStore
+                if isinstance(chunk_store, storage.InternalStore):
+                    # blocks already exist
+                    block = chunk_store._block_kv_store[chunk_key]
+                    # if this is an update, they will read and write the same fd
+                    # if this is a write_to, they will read from _fd and write to fd
+                else:
+                    block = asdf.block.Block(
+                        array_storage="internal", memmap=False, lazy_load=True, cache_data=False)
+                    # Block.__init__ calls update_size which will compress
+                    # the data to get the final size. Instead, let's override some
+                    # internal attributes that are calculated to avoid passing
+                    # in data at this point (which will end up getting cached)
+                    block._data_size = n_bytes_per_chunk
+                    block._size = n_bytes_per_chunk
+                    block._allocated = n_bytes_per_chunk
 
                 # configure the new block
-                block.output_compression = None
-                block._used = True
-                # TODO this does not account for compression
-                block._data_size = block._size = n_bytes_per_chunk
+
+                # setting _used is not necessary as it is only used in _pre_write which
+                # at this point has already been called. So any block we add here
+                # will not be removed
+                #block._used = True
+                # However, this means that update or write_to of a file that was loaded
+                # from an asdf file with an internal zarr array will have it's blocks
+                # removed, then re-added here. This isn't optimal but there is no way
+                # currently for a new-style extension to 'reserve_blocks' on _pre_write.
+                # This does not work for write_to as:
+                #   af = open(fn)
+                #   af.write_to(fn2)
+                #   af['my_zarr'] = 2
+                # will modify fn2 NOT fn
+                # setting _used on read is sub-optimal as removal of a zarr array
+                # will NOT result in removal of blocks on the next write (but will on
+                # subsequent writes)
 
                 # set up the block to return the correct chunk data when write is called
                 import weakref
@@ -71,12 +102,16 @@ class ZarrConverter(asdf.extension.Converter):
                                 # TODO handle fill_value here
                                 # make a filler array
                                 data = storage.make_filled_chunk(zarray)
-                        block.write_data(fd, numpy.frombuffer(data, dtype='uint8'))
+                        block._write_data(fd, numpy.frombuffer(data, dtype='uint8'))
                     block.write = write
 
-                wrap_write(block, weakref.ref(obj.store), chunk_key)
+                wrap_write(block, weakref.ref(chunk_store), chunk_key)
 
-                bi = ctx.block_manager.add(block)
+                if not isinstance(chunk_store, storage.InternalStore):
+                    bi = ctx.block_manager.add(block)
+                else:
+                    # look up the block index for the existing block
+                    bi = ctx.block_manager._internal_blocks.index(block)
                 block_indicies.append(bi)
 
             source = f'blocks://{block_indicies[0]}:{block_indicies[-1]+1}'
@@ -84,21 +119,21 @@ class ZarrConverter(asdf.extension.Converter):
             return {'.zarray': zarray, 'source': source}
         else:
             # handle other storage types
-            if isinstance(obj.store, zarr.storage.DirectoryStore):
+            if isinstance(chunk_store, zarr.storage.DirectoryStore):
                 # For a DirectoryStore use a file://<filename> source
                 zarray = json.loads(obj.store['.zarray'])
                 return {'source': f'file://{obj.chunk_store.path}', '.zarray': zarray}
-            elif isinstance(obj.store, zarr.storage.FSStore):
+            elif isinstance(chunk_store, zarr.storage.FSStore):
                 # TODO at the moment only s3 is supported
-                source = f's3://{obj.store.path}'
+                source = f's3://{chunk_store.path}'
 
                 # read .zarray from store
                 zarray = json.loads(obj.store['.zarray'])
 
                 # TODO other options (client_kwargs, etc)
-                client_kwargs = obj.store.fs.client_kwargs
+                client_kwargs = chunk_store.fs.client_kwargs
                 return {'source': source, '.zarray': zarray, 'client_kwargs': client_kwargs}
-            raise NotImplementedError(f"{self.__class__}: zarr.store type {type(obj.store)} not supported")
+            raise NotImplementedError(f"{self.__class__}: zarr.store type {type(chunk_store)} not supported")
 
     def from_yaml_tree(self, node, tag, ctx):
         # defer import
@@ -144,6 +179,14 @@ class ZarrConverter(asdf.extension.Converter):
                 block._lazy_load = True
                 block._should_memmap = False
                 block._cache_data = False
+                # There is currently no way to hook this extension to
+                # 'reserve_blocks' during _find_used_blocks. So to prevent blocks
+                # from being removed and re-added during write we mark them
+                # as used on read.
+                # This does mean that blocks will not be removed if the zarr array
+                # is removed and the file saved (they will however be removed if that
+                # saved file is re-read and re-saved).
+                block._used = True
 
             internal_store = storage.InternalStore(zarray, blocks)
             return zarr.open(store=internal_store)
