@@ -49,6 +49,34 @@ def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
             assert numpy.array_equal(af[n], a)
 
 
+@pytest.mark.parametrize("copy_arrays", [True, False])
+@pytest.mark.parametrize("lazy_load", [True, False])
+@pytest.mark.parametrize("with_update", [True, False])
+def test_modify(tmp_path, with_update, copy_arrays, lazy_load):
+    # make a file
+    store = DirectoryStore(tmp_path / 'zarr_array')
+    arr = create_zarray(store=store)
+    tree = {'arr': arr}
+    fn = tmp_path / 'test.asdf'
+    af = asdf.AsdfFile(tree)
+    af.write_to(fn)
+
+    # open the file, modify the array
+    with asdf.open(fn, mode='rw', copy_arrays=copy_arrays, lazy_load=lazy_load) as af:
+        assert af['arr'][0, 0] != 42
+        af['arr'][0, 0] = 42
+        # now modify
+        assert af['arr'][0, 0] == 42
+        # also check the original array
+        assert arr[0, 0] == 42
+        if with_update:
+            af.update()
+
+    # reopen the file, check for the modification
+    with asdf.open(fn, mode='rw', copy_arrays=copy_arrays, lazy_load=lazy_load) as af:
+        assert af['arr'][0, 0] == 42
+
+
 class CustomStore(zarr.storage.Store, UserDict):
     # an 'unknown' custom storage class
     pass
@@ -64,5 +92,27 @@ def test_raise_on_unsupported(store_type):
     tree = {'arr': arr}
     with pytest.raises(NotImplementedError):
         af = asdf.AsdfFile(tree)
+
+
+@pytest.mark.skip("ASDF Converters aren't aware of the open mode")
+@pytest.mark.parametrize("mode", ["r", "rw"])
+def test_open_mode(tmp_path, mode):
+    store = store_type(tmp_path / 'zarr_array')
+    arr = create_zarray(store=store)
+    tree = {'arr': arr}
+    fn = tmp_path / 'test.asdf'
+    af = asdf.AsdfFile(tree)
+    af.write_to(fn)
+
+    with asdf.open(fn, mode=mode) as af:
+        if mode == 'r':
+            # array changes during an open 'r' should fail
+            with pytest.raises():
+                af['arr'][0, 0] = 1
+        elif mode == 'rw':
+            # array changes should be allowed during 'rw'
+            af['arr'][0, 0] = 1
+        else:
+            raise Exception(f"Unknown mode {mode}")
 
 # TODO test FSStore (will require a mock s3 server)
