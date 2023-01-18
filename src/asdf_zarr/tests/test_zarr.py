@@ -1,3 +1,4 @@
+from collections import UserDict
 import itertools
 
 import asdf
@@ -27,12 +28,8 @@ def create_zarray(shape=None, chunks=None, dtype='f8', store=None):
 @pytest.mark.parametrize("compression", ["input", "zlib"])
 @pytest.mark.parametrize("store_type", [DirectoryStore, NestedDirectoryStore])
 def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
-    if store_type in (DirectoryStore, NestedDirectoryStore):
-        store1 = store_type(tmp_path / 'zarr_array_1')
-        store2 = store_type(tmp_path / 'zarr_array_2')
-    else:
-        store1 = store_type()
-        store2 = store_type()
+    store1 = store_type(tmp_path / 'zarr_array_1')
+    store2 = store_type(tmp_path / 'zarr_array_2')
 
     arr1 = create_zarray(store=store1)
     arr2 = create_zarray(store=store2)
@@ -52,6 +49,20 @@ def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
             assert numpy.array_equal(af[n], a)
 
 
-# TODO assert KVStore, MemoryStore, TempStore throw errors
-# TODO assert unknown throws error
-# TODO test FSStore
+class CustomStore(zarr.storage.Store, UserDict):
+    # an 'unknown' custom storage class
+    pass
+
+
+@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, TempStore, CustomStore])
+def test_raise_on_unsupported(store_type):
+    if store_type is KVStore:
+        store = store_type({})
+    else:
+        store = store_type()
+    arr = create_zarray(store=store)
+    tree = {'arr': arr}
+    with pytest.raises(NotImplementedError):
+        af = asdf.AsdfFile(tree)
+
+# TODO test FSStore (will require a mock s3 server)

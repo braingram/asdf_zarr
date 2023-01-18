@@ -1,7 +1,7 @@
 import copy
 
 import zarr.storage
-from zarr.storage import DirectoryStore, FSStore, NestedDirectoryStore
+from zarr.storage import DirectoryStore, FSStore, NestedDirectoryStore, TempStore
 
 
 def encode_storage(store):
@@ -19,7 +19,7 @@ def encode_storage(store):
     obj_dict : dictionary encoding
     """
     obj_dict = {'type_string': store.__class__.__name__}
-    if isinstance(store, (DirectoryStore, NestedDirectoryStore)):
+    if isinstance(store, (DirectoryStore, NestedDirectoryStore)) and not isinstance(store, TempStore):
         # dimension separator is _dimension separator and should be
         # read from the zarray itself, not the store
         obj_dict['normalize_keys'] = store.normalize_keys
