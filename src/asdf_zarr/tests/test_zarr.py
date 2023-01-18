@@ -6,7 +6,7 @@ import asdf_zarr
 import numpy
 import pytest
 import zarr
-from zarr.storage import KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore, TempStore
+from zarr.storage import KVStore, DirectoryStore, FSStore, MemoryStore, NestedDirectoryStore, TempStore
 
 
 def create_zarray(shape=None, chunks=None, dtype='f8', store=None):
@@ -115,4 +115,40 @@ def test_open_mode(tmp_path, mode):
         else:
             raise Exception(f"Unknown mode {mode}")
 
+
 # TODO test FSStore (will require a mock s3 server)
+@pytest.mark.fake_s3()
+def test_fsstore_s3(tmp_path):
+    # endpoint used to fake s3
+    endpoint_url = 'http://127.0.0.1:5555'
+    bucket = 'test_bucket'
+    url = f's3://{bucket}/my_zarr'
+
+    # connect to 's3'
+    import boto3
+    conn = boto3.resource('s3', endpoint_url=endpoint_url)
+
+    # make a new bucket to store the data
+    bucket = conn.create_bucket(Bucket=bucket)
+
+    # clear the bucket so zarr.zeros can create an array
+    bucket.objects.delete()
+
+    # create a fsstore using the s3 url
+    store = FSStore(url, client_kwargs={'endpoint_url': endpoint_url})
+
+    # create a new chunked array
+    a = zarr.zeros(store=store, shape=(1000, 1000), chunks=(100, 100), dtype='i4')
+    # write to the array
+    a[42, 26] = 42
+
+    # create an asdf file and save the chunked array
+    af = asdf.AsdfFile()
+    af['my_zarr'] = a
+    fn = tmp_path / 'test_zarr.asdf'
+    af.write_to(fn)
+
+    # open the asdf file and check the chunked array loaded
+    with asdf.open(fn) as af:
+        a = af['my_zarr']
+        assert a[42, 26] == 42
