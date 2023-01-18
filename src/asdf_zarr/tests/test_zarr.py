@@ -1,56 +1,57 @@
+import itertools
+
 import asdf
 import asdf_zarr
+import numpy
+import pytest
 import zarr
+from zarr.storage import KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore, TempStore
 
 
-def test_directory_store(tmp_path):
-    af = asdf.AsdfFile()
-    data_dir = tmp_path / 'zarr_data'
-    store = zarr.storage.DirectoryStore(data_dir)
-    if data_dir.exists():
-        a = zarr.open(store=store)
+def create_zarray(shape=None, chunks=None, dtype='f8', store=None):
+    if shape is None:
+        shape = (6, 9)
+    if chunks is None:
+        chunks = [max(1, d // 3) for d in shape]
+    arr = zarr.creation.create((6, 9), store=store, chunks=chunks, dtype=dtype)
+    for chunk_index in itertools.product(*[range(c) for c in arr.cdata_shape]):
+        inds = []
+        for (i, c) in zip(chunk_index, arr.chunks):
+            inds.append(slice(i * c, (i + 1) * c))
+        arr[tuple(inds)] = i
+    return arr
+
+
+@pytest.mark.parametrize("copy_arrays", [True, False])
+@pytest.mark.parametrize("lazy_load", [True, False])
+@pytest.mark.parametrize("compression", ["input", "zlib"])
+@pytest.mark.parametrize("store_type", [DirectoryStore, NestedDirectoryStore])
+def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
+    if store_type in (DirectoryStore, NestedDirectoryStore):
+        store1 = store_type(tmp_path / 'zarr_array_1')
+        store2 = store_type(tmp_path / 'zarr_array_2')
     else:
-        a = zarr.zeros(store=store, shape=(1000, 1000), chunks=(100, 100), dtype='i4')
-    a[42, 26] = 42
+        store1 = store_type()
+        store2 = store_type()
 
-    af['my_zarr'] = a
-    fn = tmp_path / 'test_zarr.asdf'
-    af.write_to(fn)
+    arr1 = create_zarray(store=store1)
+    arr2 = create_zarray(store=store2)
+    arr2[:] = arr2[:] * -2
+    tree = {'arr1': arr1, 'arr2': arr2}
 
-    with asdf.open(fn) as af:
-        a = af['my_zarr']
-        assert isinstance(a, zarr.core.Array)
-        assert isinstance(a.chunk_store, zarr.storage.DirectoryStore)
-        assert a[42, 26] == 42
-        assert a[0, 0] == 0
-
-
-def test_internal(tmp_path):
-    af = asdf.AsdfFile()
-
-    store = asdf_zarr.store.InternalStore(af.blocks)
-    af['my_zarr'] = zarr.create(100, store=store, chunks=10, dtype='i4', compressor=None, fill_value=42)
 
     fn = tmp_path / 'test.asdf'
-    raw_fp = fn.open(mode='bw+')
-    fp = asdf.generic_io.get_file(raw_fp, mode='rw')
-    af.write_to(fp)
-    a = af['my_zarr']
-    for i in range(5):
-        a[i * 10] = i
-        assert a[i * 10] == i
-    store.write_remaining_blocks()
-    raw_fp.close()
+    af = asdf.AsdfFile(tree)
+    af.write_to(fn, all_array_compression=compression)
 
-    with asdf.open(fn) as af:
-        a = af['my_zarr']
-        assert isinstance(a, zarr.core.Array)
-        assert isinstance(a.chunk_store, asdf_zarr.store.InternalStore)
-        for i in range(5):
-            assert a[i * 10] == i
-        for i in range(5, 10):
-            assert a[i * 10] == 42
+    with asdf.open(fn, mode='r', copy_arrays=copy_arrays, lazy_load=lazy_load) as af:
+        for (n, a) in (('arr1', arr1), ('arr2', arr2)):
+            assert isinstance(af[n], zarr.core.Array)
+            # for these tests, data should not be converted to a different storage format
+            assert isinstance(af[n].chunk_store, store_type)
+            assert numpy.array_equal(af[n], a)
 
 
-def test_convert_chunked(tmp_path):
-    pass
+# TODO assert KVStore, MemoryStore, TempStore throw errors
+# TODO assert unknown throws error
+# TODO test FSStore
