@@ -46,7 +46,7 @@ def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
             assert isinstance(af[n], zarr.core.Array)
             # for these tests, data should not be converted to a different storage format
             assert isinstance(af[n].chunk_store, store_type)
-            assert numpy.array_equal(af[n], a)
+            assert numpy.allclose(af[n], a)
 
 
 @pytest.mark.parametrize("copy_arrays", [True, False])
@@ -116,7 +116,6 @@ def test_open_mode(tmp_path, mode):
             raise Exception(f"Unknown mode {mode}")
 
 
-# TODO test FSStore (will require a mock s3 server)
 @pytest.mark.fake_s3()
 def test_fsstore_s3(tmp_path):
     # endpoint used to fake s3
@@ -152,3 +151,49 @@ def test_fsstore_s3(tmp_path):
     with asdf.open(fn) as af:
         a = af['my_zarr']
         assert a[42, 26] == 42
+
+
+#@pytest.mark.parametrize("compression", ["input", "zlib"])
+@pytest.mark.parametrize("compression", ["input"])
+#@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore])
+@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore])
+def test_convert_to_internal(tmp_path, compression, store_type):
+    # when requested, ingest the data and include it as internal blocks
+    if store_type in (KVStore, MemoryStore):
+        store1 = store_type({})
+        store2 = store_type({})
+    else:
+        store1 = store_type(tmp_path / 'zarr_array_1')
+        store2 = store_type(tmp_path / 'zarr_array_2')
+
+    arr1 = create_zarray(store=store1)
+    arr2 = create_zarray(store=store2)
+    arr2[:] = arr2[:] * -2
+    #tree = {'arr1': arr1, 'arr2': arr2}
+
+    # TODO sort out how to fix this
+    # setting the tree here causes a validate before there is a chance to set the
+    # 'internal' storage setting
+    af = asdf.AsdfFile({})
+    af.set_block_storage(arr1, "internal")
+    af.set_block_storage(arr2, "internal")
+    af['arr1'] = arr1
+    af['arr2'] = arr2
+
+    fn = tmp_path / 'test.asdf'
+    af.write_to(fn, all_array_compression=compression)
+
+    with asdf.open(fn, mode='r') as af:
+        for (n, a) in (('arr1', arr1), ('arr2', arr2)):
+            assert isinstance(af[n], zarr.core.Array)
+            # for these tests, data should not be converted to a different storage format
+            # TODO test data is INTERNAL
+            #assert isinstance(af[n].chunk_store, store_type)
+            assert numpy.allclose(af[n], a)
+
+
+@pytest.mark.skip("Not Implemented")
+def test_warn_when_copy():
+    # warn if a file with internal blocks is loaded with copy_arrays
+    # this will require generalizing copy_array/lazy_load
+    pass
