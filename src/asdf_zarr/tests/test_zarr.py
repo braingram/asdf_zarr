@@ -173,14 +173,8 @@ def test_convert_to_internal(tmp_path, compression, store_type):
     arr2[:] = arr2[:] * -2
     tree = {'arr1': arr1, 'arr2': arr2}
 
-    # TODO sort out how to fix this
-    # setting the tree here causes a validate before there is a chance to set the
-    # 'internal' storage setting
-    af = asdf.AsdfFile({})
-    af.set_block_storage(arr1, "internal")
-    af.set_block_storage(arr2, "internal")
-    af['arr1'] = arr1
-    af['arr2'] = arr2
+    # internal storage is assumed
+    af = asdf.AsdfFile(tree)
 
     fn = tmp_path / 'test.asdf'
     fn2 = tmp_path / 'test2.asdf'
