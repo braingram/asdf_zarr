@@ -57,11 +57,24 @@ def _generate_chunk_map_callback(zarray, chunk_key_block_index_map):
 
 
 class InternalStore(zarr.storage.Store):
-    def __init__(self, chunk_block_map, ctx, sep):
+    def __init__(self, chunk_block_map, ctx, sep, blocks):
         super().__init__()
         self._ctx = ctx
         self._chunk_block_map = chunk_block_map
         self.__sep = sep
+        # When reading from an internal store and writing to a file
+        # asdf will need to keep track of the blocks used by this
+        # object and not throw them away during reserve_blocks. These
+        # are manually tracked here but it might be possible to
+        # update the _data_to_block_mapping through the use of
+        # identify_blocks to avoid this. All that needs to be known
+        # is the key to block index mapping. For updates to zarr
+        # arrays that require addition of new chunks (or perhaps even
+        # overwriting existing chunks) a system for adding blocks
+        # on top of those already reserved is needed.
+        self._reserved_blocks = blocks
+        for index in chunk_block_map[chunk_block_map != MISSING_CHUNK]:
+            self._reserved_blocks.append(ctx._block_manager.get_block(int(index)))
 
     def _sep(self, key):
         if self.__sep is None:
@@ -93,5 +106,5 @@ class InternalStore(zarr.storage.Store):
         return numpy.count_nonzero(self._chunk_block_map != MISSING_CHUNK)
 
 
-def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep):
-    return InternalStore(chunk_block_map, ctx, sep)
+def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep, blocks):
+    return InternalStore(chunk_block_map, ctx, sep, blocks)

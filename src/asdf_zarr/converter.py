@@ -69,17 +69,20 @@ class ZarrConverter(asdf.extension.Converter):
             zarray_meta = node['.zarray']
             cdata_shape = tuple(math.ceil(s / c)
                          for s, c in zip(zarray_meta['shape'], zarray_meta['chunks']))
+            blks = [ctx._block_manager.get_block(node['chunk_block_map'])]
             chunk_block_map = numpy.frombuffer(
-                ctx.load_block(node['chunk_block_map']),
+                blks[0].data,
                 dtype='int32').reshape(cdata_shape)
             # TODO clean up these arguments
             chunk_store = storage._build_internal_store(
                 zarray_meta,
                 chunk_block_map,
                 ctx,
-                node['.zarray'].get('dimension_separator', '.'))
+                node['.zarray'].get('dimension_separator', '.'),
+                blks)
             # TODO read/write mode here
-            return zarr.open_array(store=store, chunk_store=chunk_store)
+            obj = zarr.open_array(store=store, chunk_store=chunk_store)
+            return obj
 
         chunk_store = util.decode_storage(node['store'])
         if 'meta' in node:
@@ -88,13 +91,22 @@ class ZarrConverter(asdf.extension.Converter):
         else:
             store = chunk_store
         # TODO mode, version, path_str?
-        return zarr.open(store=store, chunk_store=chunk_store)
+        obj = zarr.open(store=store, chunk_store=chunk_store)
+        return obj
 
     def reserve_blocks(self, obj, tag, ctx):
         storage_settings = self._get_storage_settings(obj, tag, ctx)
+
         if storage_settings != "internal":
             return []
-        return self._set_internal_blocks(obj, tag, ctx)
+
+        if isinstance(obj.chunk_store, storage.InternalStore):
+            # we are reading from blocks to resolve this store
+            # so reuse the existing blocks
+            return obj.chunk_store._reserved_blocks
+
+        blks = self._set_internal_blocks(obj, tag, ctx)
+        return blks
 
     def _get_storage_settings(self, obj, tag, ctx):
         if obj.chunk_store is not None:
