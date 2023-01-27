@@ -6,95 +6,9 @@ import asdf
 import numpy
 import zarr
 
-
-MISSING_CHUNK = -1
-
-
-def _iter_chunk_keys(zarray, only_initialized=False):
-    """Using zarray metadata iterate over chunk keys"""
-    if only_initialized:
-        for k in zarr.storage.listdir(zarray.chunk_store):
-            if k == '.zarray':
-                continue
-            yield k
-        return
-    # load meta
-    zarray_meta = json.loads(zarray.store['.zarray'])
-    dimension_separator = zarray_meta.get('dimension_separator', '.')
-
-    # make blocks and map them to the internal kv store
-    # compute number of chunks (across all axes)
-    chunk_counts = [math.ceil(s / c) for (s, c) in
-                    zip(zarray_meta['shape'], zarray_meta['chunks'])]
-
-    # iterate over all chunk keys
-    chunk_iter = itertools.product(*[range(c) for c in chunk_counts])
-    for c in chunk_iter:
-        key = dimension_separator.join([str(i) for i in c])
-        yield key
-
-
-def _generate_chunk_data_callback(zarray, chunk_key):
-    def chunk_data_callback(zarray=zarray, chunk_key=chunk_key):
-        return numpy.frombuffer(zarray.store.get(chunk_key), dtype='uint8')
-    return chunk_data_callback
-
-
-def _generate_chunk_map_callback(zarray, chunk_key_block_index_map):
-    # make an array
-    def chunk_map_callback(zarray=zarray, chunk_key_block_index_map=chunk_key_block_index_map):
-        chunk_map = numpy.zeros(zarray.cdata_shape, dtype='int32')
-        chunk_map[:] = MISSING_CHUNK  # set all as uninitialized
-        zarray_meta = json.loads(zarray.store['.zarray'])
-        dimension_separator = zarray_meta.get('dimension_separator', '.')
-        for k in _iter_chunk_keys(zarray, only_initialized=True):
-            index = chunk_key_block_index_map[k]
-            coords = tuple([int(sk) for sk in k.split(dimension_separator)])
-            chunk_map[coords] = index
-        return chunk_map
-    return chunk_map_callback
-
-
-def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep):
-    # go from key to chunk coordinate
-    # use coordinate and chunk_block_map to lookup block using ctx
-    class InternalStore(zarr.storage.Store):
-        def __init__(self, chunk_block_map, ctx, sep):
-            super().__init__()
-            self._ctx = ctx
-            self._chunk_block_map = chunk_block_map
-            self.__sep = sep
-
-        def _sep(self, key):
-            if self.__sep is None:
-                return key
-            return key.split(self.__sep)
-
-        def _coords(self, key):
-            return tuple([int(sk) for sk in self._sep(key)])
-
-        def __getitem__(self, key):
-            coords = self._coords(key)
-            index = int(self._chunk_block_map[coords])
-            if index == MISSING_CHUNK:
-                return None
-            return self._ctx.load_block(index)
-
-        def __setitem__(self, key, value):
-            raise NotImplementedError("writing to InternalStore not yet supported")
-
-        def __delitem__(self, key):
-            raise NotImplementedError("deleting chunks in InternalStore not yet supported")
-
-        def __iter__(self):
-            for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
-                coord = tuple(coord)
-                yield self._sep.join((str(c) for c in coord))
-
-        def __len__(self):
-            return numpy.count_nonzero(self._chunk_block_map != MISSING_CHUNK)
-
-    return InternalStore(chunk_block_map, ctx, sep)
+from . import util
+from . import storage
+# TODO convert imports to local to avoid imports on extension loading
 
 
 class ZarrConverter(asdf.extension.Converter):
@@ -102,10 +16,8 @@ class ZarrConverter(asdf.extension.Converter):
     types = ["zarr.core.Array"]
 
     def to_yaml_tree(self, obj, tag, ctx):
-        from . import util
-
-        storage = ctx.get_block_storage_settings(id(obj))
-        if storage == "internal":
+        storage_settings = self._get_storage_settings(obj, tag, ctx)
+        if storage_settings == "internal":
             if isinstance(obj, zarr.storage.NestedDirectoryStore):
                 # TODO something is odd with NestedDirectoryStore where
                 # it returns chunks for listdir (when they are defined)
@@ -114,6 +26,7 @@ class ZarrConverter(asdf.extension.Converter):
                 # the chunks have to be accessed with '/' separator
                 # even if the default '.' is set
                 raise NotImplementedError("NestedDirectoryStore to internal not supported")
+            # TODO should we enforce no zarr compression here?
             # include data from this zarr array in the asdf file
             # include the meta data in the tree
             meta = json.loads(obj.store['.zarray'])
@@ -145,9 +58,11 @@ class ZarrConverter(asdf.extension.Converter):
         import zarr
 
         from . import util
+        from . import storage
 
         if '.zarray' in node and 'chunk_block_map' in node:
             # this is an internally stored zarr array
+            # TODO should we enforce no zarr compression here?
             # load the meta data into memory
             store = zarr.storage.KVStore({'.zarray': json.dumps(node['.zarray'])})
             # setup an InternalStore to read block data (when requested)
@@ -158,7 +73,7 @@ class ZarrConverter(asdf.extension.Converter):
                 ctx.load_block(node['chunk_block_map']),
                 dtype='int32').reshape(cdata_shape)
             # TODO clean up these arguments
-            chunk_store = _build_internal_store(
+            chunk_store = storage._build_internal_store(
                 zarray_meta,
                 chunk_block_map,
                 ctx,
@@ -176,11 +91,32 @@ class ZarrConverter(asdf.extension.Converter):
         return zarr.open(store=store, chunk_store=chunk_store)
 
     def reserve_blocks(self, obj, tag, ctx):
-        #return [ctx.reserve_block(id(obj), lambda: np.ndarray(len(obj.payload), dtype="uint8", buffer=obj.payload))]
-        storage = ctx.get_block_storage_settings(id(obj))
-        if storage != "internal":
+        storage_settings = self._get_storage_settings(obj, tag, ctx)
+        if storage_settings != "internal":
             return []
         return self._set_internal_blocks(obj, tag, ctx)
+
+    def _get_storage_settings(self, obj, tag, ctx):
+        if obj.chunk_store is not None:
+            # data is in chunk_store, metadata is in store
+            meta_store = obj.store
+            chunk_store = obj.chunk_store
+        else:
+            meta_store = obj.store
+            chunk_store = obj.store
+
+        storage_settings = ctx.get_block_storage_settings(id(obj))
+        if storage_settings is None:  # guess storage
+            if isinstance(
+                    chunk_store, (
+                        zarr.storage.KVStore,
+                        zarr.storage.MemoryStore,
+                        zarr.storage.TempStore,
+                        storage.InternalStore,
+                    )):
+                storage_settings = "internal"
+                ctx.set_block_storage_settings(id(obj), storage_settings)
+        return storage_settings
 
     def _set_internal_blocks(self, obj, tag, ctx):
         # making the block chunk map here requires knowing the index of
@@ -190,10 +126,10 @@ class ZarrConverter(asdf.extension.Converter):
         # chunks have data
         blocks = []
         chunk_key_block_index_map = {}
-        for chunk_key in _iter_chunk_keys(obj, only_initialized=True):
+        for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
             # generate data callback
             key = (id(obj), chunk_key)
-            data_callback = _generate_chunk_data_callback(obj, chunk_key)
+            data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
             blk = ctx.reserve_block(key, data_callback)
             # TODO it might be nice to use the block here
             index = ctx.find_block_index(key, data_callback)
@@ -204,6 +140,6 @@ class ZarrConverter(asdf.extension.Converter):
         blocks.append(
             ctx.reserve_block(
                 id(obj),
-                _generate_chunk_map_callback(obj, chunk_key_block_index_map)))
+                storage._generate_chunk_map_callback(obj, chunk_key_block_index_map)))
 
         return blocks

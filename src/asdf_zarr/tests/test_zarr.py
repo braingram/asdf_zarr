@@ -92,6 +92,8 @@ def test_raise_on_unsupported(store_type):
     tree = {'arr': arr}
     with pytest.raises(NotImplementedError):
         af = asdf.AsdfFile(tree)
+        af.set_block_storage(arr, 'external')
+        af.validate()
 
 
 @pytest.mark.skip("ASDF Converters aren't aware of the open mode")
@@ -153,8 +155,8 @@ def test_fsstore_s3(tmp_path):
         assert a[42, 26] == 42
 
 
-#@pytest.mark.parametrize("compression", ["input", "zlib"])
-@pytest.mark.parametrize("compression", ["input"])
+@pytest.mark.parametrize("compression", ["input", "zlib"])
+#@pytest.mark.parametrize("compression", ["input"])
 #@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore])
 @pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore])
 def test_convert_to_internal(tmp_path, compression, store_type):
@@ -169,7 +171,7 @@ def test_convert_to_internal(tmp_path, compression, store_type):
     arr1 = create_zarray(store=store1)
     arr2 = create_zarray(store=store2)
     arr2[:] = arr2[:] * -2
-    #tree = {'arr1': arr1, 'arr2': arr2}
+    tree = {'arr1': arr1, 'arr2': arr2}
 
     # TODO sort out how to fix this
     # setting the tree here causes a validate before there is a chance to set the
@@ -181,6 +183,7 @@ def test_convert_to_internal(tmp_path, compression, store_type):
     af['arr2'] = arr2
 
     fn = tmp_path / 'test.asdf'
+    fn2 = tmp_path / 'test2.asdf'
     af.write_to(fn, all_array_compression=compression)
 
     with asdf.open(fn, mode='r') as af:
@@ -190,6 +193,15 @@ def test_convert_to_internal(tmp_path, compression, store_type):
             # TODO test data is INTERNAL
             #assert isinstance(af[n].chunk_store, store_type)
             assert numpy.allclose(af[n], a)
+        # check that resaving works
+    #     af.write_to(fn2, all_array_compression=compression)
+
+    # with asdf.open(fn2, mode='r') as af:
+    #     for (n, a) in (('arr1', arr1), ('arr2', arr2)):
+    #         assert numpy.allclose(af[n], a)
+    #         # modify data, make sure the internal data is unchanged
+    #         a[:] = a + 1
+    #         assert not numpy.allclose(af[n], a)
 
 
 @pytest.mark.skip("Not Implemented")
