@@ -100,10 +100,10 @@ class ZarrConverter(asdf.extension.Converter):
         if storage_settings != "internal":
             return []
 
-        if isinstance(obj.chunk_store, storage.InternalStore):
-            # we are reading from blocks to resolve this store
-            # so reuse the existing blocks
-            return obj.chunk_store._reserved_blocks
+        #if isinstance(obj.chunk_store, storage.InternalStore):
+        #    # we are reading from blocks to resolve this store
+        #    # so reuse the existing blocks
+        #    return obj.chunk_store._reserved_blocks
 
         blks = self._set_internal_blocks(obj, tag, ctx)
         return blks

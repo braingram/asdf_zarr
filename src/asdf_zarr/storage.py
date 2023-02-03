@@ -72,9 +72,9 @@ class InternalStore(zarr.storage.Store):
         # arrays that require addition of new chunks (or perhaps even
         # overwriting existing chunks) a system for adding blocks
         # on top of those already reserved is needed.
-        self._reserved_blocks = blocks
-        for index in chunk_block_map[chunk_block_map != MISSING_CHUNK]:
-            self._reserved_blocks.append(ctx._block_manager.get_block(int(index)))
+        #self._reserved_blocks = blocks
+        #for index in chunk_block_map[chunk_block_map != MISSING_CHUNK]:
+        #    self._reserved_blocks.append(ctx._block_manager.get_block(int(index)))
 
     def _sep(self, key):
         if self.__sep is None:
