@@ -19,7 +19,7 @@ class ZarrConverter(asdf.extension.Converter):
         storage_settings = self._get_storage_settings(obj, tag, ctx)
         if storage_settings == "internal":
             if isinstance(obj, zarr.storage.NestedDirectoryStore):
-                # TODO something is odd with NestedDirectoryStore where
+                # something is odd with NestedDirectoryStore where
                 # it returns chunks for listdir (when they are defined)
                 # However, the key generation appears to be different
                 # because attempts to get those chunks it fails because
@@ -33,8 +33,15 @@ class ZarrConverter(asdf.extension.Converter):
             obj_dict = {}
             obj_dict['.zarray'] = meta
             # update callbacks
-            self._set_internal_blocks(obj, tag, ctx)
-            obj_dict['chunk_block_map'] = ctx.find_block_index(id(obj))
+            chunk_key_block_index_map = {}
+            for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
+                key = (id(obj), chunk_key)
+                data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
+                block_index = ctx.find_block_index(key, data_callback)
+                chunk_key_block_index_map[chunk_key] = block_index
+            obj_dict['chunk_block_map'] = ctx.find_block_index(
+                id(obj),
+                storage._generate_chunk_map_callback(obj, chunk_key_block_index_map))
             return obj_dict
 
         if obj.chunk_store is not None:
@@ -69,19 +76,27 @@ class ZarrConverter(asdf.extension.Converter):
             zarray_meta = node['.zarray']
             cdata_shape = tuple(math.ceil(s / c)
                          for s, c in zip(zarray_meta['shape'], zarray_meta['chunks']))
-            blks = [ctx._block_manager.get_block(node['chunk_block_map'])]
+            chunk_block_map_index = node['chunk_block_map']
             chunk_block_map = numpy.frombuffer(
-                blks[0].data,
-                dtype='int32').reshape(cdata_shape)
+                ctx.load_block(chunk_block_map_index), dtype='int32').reshape(cdata_shape)
+            #blks = [ctx._block_manager.get_block(node['chunk_block_map'])]
+            #chunk_block_map = numpy.frombuffer(
+            #    blks[0].data,
+            #    dtype='int32').reshape(cdata_shape)
             # TODO clean up these arguments
             chunk_store = storage._build_internal_store(
                 zarray_meta,
                 chunk_block_map,
                 ctx,
                 node['.zarray'].get('dimension_separator', '.'),
-                blks)
+            )
             # TODO read/write mode here
             obj = zarr.open_array(store=store, chunk_store=chunk_store)
+            # now that we have an object, claim the blocks
+            ctx.claim_block(chunk_block_map_index, id(obj))
+            for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
+                block_index = chunk_store._key_to_block_index(chunk_key)
+                ctx.claim_block(block_index, (id(obj), chunk_key))
             return obj
 
         chunk_store = util.decode_storage(node['store'])
@@ -100,13 +115,13 @@ class ZarrConverter(asdf.extension.Converter):
         if storage_settings != "internal":
             return []
 
-        #if isinstance(obj.chunk_store, storage.InternalStore):
-        #    # we are reading from blocks to resolve this store
-        #    # so reuse the existing blocks
-        #    return obj.chunk_store._reserved_blocks
-
-        blks = self._set_internal_blocks(obj, tag, ctx)
-        return blks
+        # if we're using internal storage, return keys for
+        # the chunk_block_map
+        keys = [id(obj), ]
+        # all initialized chunks
+        for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
+            keys.append((id(obj), chunk_key))
+        return keys
 
     def _get_storage_settings(self, obj, tag, ctx):
         if obj.chunk_store is not None:
@@ -129,29 +144,3 @@ class ZarrConverter(asdf.extension.Converter):
                 storage_settings = "internal"
                 ctx.set_block_storage_settings(id(obj), storage_settings)
         return storage_settings
-
-    def _set_internal_blocks(self, obj, tag, ctx):
-        # making the block chunk map here requires knowing the index of
-        # each block with chunk data
-        # so first, generate/find a block for each filled chunk
-        # generate a block for each filled chunk and keep track of which
-        # chunks have data
-        blocks = []
-        chunk_key_block_index_map = {}
-        for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-            # generate data callback
-            key = (id(obj), chunk_key)
-            data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
-            blk = ctx.reserve_block(key, data_callback)
-            # TODO it might be nice to use the block here
-            index = ctx.find_block_index(key, data_callback)
-            chunk_key_block_index_map[chunk_key] = index
-            blocks.append(blk)
-
-        # now generate a callback to return the chunk_key_block_map
-        blocks.append(
-            ctx.reserve_block(
-                id(obj),
-                storage._generate_chunk_map_callback(obj, chunk_key_block_index_map)))
-
-        return blocks

@@ -57,7 +57,7 @@ def _generate_chunk_map_callback(zarray, chunk_key_block_index_map):
 
 
 class InternalStore(zarr.storage.Store):
-    def __init__(self, chunk_block_map, ctx, sep, blocks):
+    def __init__(self, chunk_block_map, ctx, sep):
         super().__init__()
         self._ctx = ctx
         self._chunk_block_map = chunk_block_map
@@ -84,9 +84,12 @@ class InternalStore(zarr.storage.Store):
     def _coords(self, key):
         return tuple([int(sk) for sk in self._sep(key)])
 
-    def __getitem__(self, key):
+    def _key_to_block_index(self, key):
         coords = self._coords(key)
-        index = int(self._chunk_block_map[coords])
+        return int(self._chunk_block_map[coords])
+
+    def __getitem__(self, key):
+        index = self._key_to_block_index(key)
         if index == MISSING_CHUNK:
             return None
         return self._ctx.load_block(index)
@@ -106,5 +109,5 @@ class InternalStore(zarr.storage.Store):
         return numpy.count_nonzero(self._chunk_block_map != MISSING_CHUNK)
 
 
-def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep, blocks):
-    return InternalStore(chunk_block_map, ctx, sep, blocks)
+def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep):
+    return InternalStore(chunk_block_map, ctx, sep)
