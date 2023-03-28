@@ -11,9 +11,9 @@ MISSING_CHUNK = -1
 def _iter_chunk_keys(zarray, only_initialized=False):
     """Using zarray metadata iterate over chunk keys"""
     if only_initialized:
-        # TODO NestedDirectoryStore appears to always expect '/'
-        # as the dimension separator but listdir returns '.'
-        # this looks like a bug, filed issue with zarr
+        # TODO this does not work for NestedDirectoryStore
+        #if isinstance(zarray.chunk_store, zarr.storage.NestedDirectoryStore):
+        #    raise NotImplementedError("zarr.storage.NestedDirectoryStore is not supported")
         for k in zarr.storage.listdir(zarray.chunk_store):
             if k == '.zarray':
                 continue
@@ -61,28 +61,19 @@ class InternalStore(zarr.storage.Store):
         super().__init__()
         self._ctx = ctx
         self._chunk_block_map = chunk_block_map
-        self.__sep = sep
-        # When reading from an internal store and writing to a file
-        # asdf will need to keep track of the blocks used by this
-        # object and not throw them away during reserve_blocks. These
-        # are manually tracked here but it might be possible to
-        # update the _data_to_block_mapping through the use of
-        # identify_blocks to avoid this. All that needs to be known
-        # is the key to block index mapping. For updates to zarr
+        self._sep = sep
+        # TODO for updates to zarr
         # arrays that require addition of new chunks (or perhaps even
         # overwriting existing chunks) a system for adding blocks
         # on top of those already reserved is needed.
-        #self._reserved_blocks = blocks
-        #for index in chunk_block_map[chunk_block_map != MISSING_CHUNK]:
-        #    self._reserved_blocks.append(ctx._block_manager.get_block(int(index)))
 
-    def _sep(self, key):
-        if self.__sep is None:
+    def _sep_key(self, key):
+        if self._sep is None:
             return key
-        return key.split(self.__sep)
+        return key.split(self._sep)
 
     def _coords(self, key):
-        return tuple([int(sk) for sk in self._sep(key)])
+        return tuple([int(sk) for sk in self._sep_key(key)])
 
     def _key_to_block_index(self, key):
         coords = self._coords(key)
@@ -103,10 +94,16 @@ class InternalStore(zarr.storage.Store):
     def __iter__(self):
         for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
             coord = tuple(coord)
-            yield self.__sep.join((str(c) for c in coord))
+            yield self._sep.join((str(c) for c in coord))
 
     def __len__(self):
         return numpy.count_nonzero(self._chunk_block_map != MISSING_CHUNK)
+
+    def listdir(self, path):
+        # allows efficient zarr.storage.listdir
+        if path:
+            raise NotImplementedError("path argument not supported by InternalStore.listdir")
+        return list(self)
 
 
 def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep):

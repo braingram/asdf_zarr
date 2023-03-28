@@ -18,14 +18,6 @@ class ZarrConverter(asdf.extension.Converter):
     def to_yaml_tree(self, obj, tag, ctx):
         storage_settings = self._get_storage_settings(obj, tag, ctx)
         if storage_settings == "internal":
-            if isinstance(obj, zarr.storage.NestedDirectoryStore):
-                # something is odd with NestedDirectoryStore where
-                # it returns chunks for listdir (when they are defined)
-                # However, the key generation appears to be different
-                # because attempts to get those chunks it fails because
-                # the chunks have to be accessed with '/' separator
-                # even if the default '.' is set
-                raise NotImplementedError("NestedDirectoryStore to internal not supported")
             # TODO should we enforce no zarr compression here?
             # include data from this zarr array in the asdf file
             # include the meta data in the tree
@@ -79,10 +71,6 @@ class ZarrConverter(asdf.extension.Converter):
             chunk_block_map_index = node['chunk_block_map']
             chunk_block_map = numpy.frombuffer(
                 ctx.load_block(chunk_block_map_index), dtype='int32').reshape(cdata_shape)
-            #blks = [ctx._block_manager.get_block(node['chunk_block_map'])]
-            #chunk_block_map = numpy.frombuffer(
-            #    blks[0].data,
-            #    dtype='int32').reshape(cdata_shape)
             # TODO clean up these arguments
             chunk_store = storage._build_internal_store(
                 zarray_meta,
@@ -92,6 +80,7 @@ class ZarrConverter(asdf.extension.Converter):
             )
             # TODO read/write mode here
             obj = zarr.open_array(store=store, chunk_store=chunk_store)
+
             # now that we have an object, claim the blocks
             ctx.claim_block(chunk_block_map_index, id(obj))
             for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):

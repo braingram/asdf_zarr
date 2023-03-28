@@ -160,8 +160,7 @@ def test_fsstore_s3(tmp_path):
 # for now, disable it in testing
 #@pytest.mark.parametrize("compression", ["input", "zlib"])
 @pytest.mark.parametrize("compression", ["input"])
-#@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore])
-@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore])
+@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, DirectoryStore, NestedDirectoryStore])
 def test_convert_to_internal(tmp_path, compression, store_type):
     # when requested, ingest the data and include it as internal blocks
     if store_type in (KVStore, MemoryStore):
