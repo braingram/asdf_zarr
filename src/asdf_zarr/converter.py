@@ -27,13 +27,15 @@ class ZarrConverter(asdf.extension.Converter):
             # update callbacks
             chunk_key_block_index_map = {}
             for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-                key = (id(obj), chunk_key)
+                key = (id(obj.chunk_store), chunk_key)
                 data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
                 block_index = ctx.find_block_index(key, data_callback)
+                ctx.claim_block(block_index, key)
                 chunk_key_block_index_map[chunk_key] = block_index
             obj_dict['chunk_block_map'] = ctx.find_block_index(
-                id(obj),
+                id(obj.chunk_store),
                 storage._generate_chunk_map_callback(obj, chunk_key_block_index_map))
+            ctx.claim_block(obj_dict['chunk_block_map'], id(obj))
             return obj_dict
 
         if obj.chunk_store is not None:
@@ -66,26 +68,24 @@ class ZarrConverter(asdf.extension.Converter):
             store = zarr.storage.KVStore({'.zarray': json.dumps(node['.zarray'])})
             # setup an InternalStore to read block data (when requested)
             zarray_meta = node['.zarray']
-            cdata_shape = tuple(math.ceil(s / c)
-                         for s, c in zip(zarray_meta['shape'], zarray_meta['chunks']))
             chunk_block_map_index = node['chunk_block_map']
-            chunk_block_map = numpy.frombuffer(
-                ctx.load_block(chunk_block_map_index), dtype='int32').reshape(cdata_shape)
-            # TODO clean up these arguments
-            chunk_store = storage._build_internal_store(
-                zarray_meta,
-                chunk_block_map,
-                ctx,
-                node['.zarray'].get('dimension_separator', '.'),
-            )
+
+            chunk_store = storage.InternalStore(ctx, chunk_block_map_index, zarray_meta)
+
+            #    zarray_meta,
+            #    chunk_block_map,
+            #    ctx,
+            #    node['.zarray'].get('dimension_separator', '.'),
+            #)
+            # # now that we have an object, claim the blocks
+            # # use id(chunk_store) in case this is used for multiple zarr arrays
+            # ctx.claim_block(chunk_block_map_index, id(chunk_store))
+            # for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
+            #     block_index = chunk_store._key_to_block_index(chunk_key)
+            #     ctx.claim_block(block_index, (id(chunk_store), chunk_key))
+
             # TODO read/write mode here
             obj = zarr.open_array(store=store, chunk_store=chunk_store)
-
-            # now that we have an object, claim the blocks
-            ctx.claim_block(chunk_block_map_index, id(obj))
-            for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-                block_index = chunk_store._key_to_block_index(chunk_key)
-                ctx.claim_block(block_index, (id(obj), chunk_key))
             return obj
 
         chunk_store = util.decode_storage(node['store'])
@@ -109,7 +109,7 @@ class ZarrConverter(asdf.extension.Converter):
         keys = [id(obj), ]
         # all initialized chunks
         for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-            keys.append((id(obj), chunk_key))
+            keys.append((id(obj.chunk_store), chunk_key))
         return keys
 
     def _get_storage_settings(self, obj, tag, ctx):

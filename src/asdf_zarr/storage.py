@@ -57,11 +57,35 @@ def _generate_chunk_map_callback(zarray, chunk_key_block_index_map):
 
 
 class InternalStore(zarr.storage.Store):
-    def __init__(self, chunk_block_map, ctx, sep):
+    def __init__(self, ctx, chunk_block_map_index, zarray_meta):
         super().__init__()
+
+
         self._ctx = ctx
-        self._chunk_block_map = chunk_block_map
-        self._sep = sep
+        self._sep = zarray_meta.get('dimension_separator', '.')
+
+        # the chunk_block_map contains block indicies
+        # organized in an array shaped like the chunks
+        # so for a zarray with 4 x 5 chunks (dimension 1
+        # split into 4 chunks) the chunk_block_map will be
+        # 4 x 5
+        cdata_shape = tuple(math.ceil(s / c)
+                     for s, c in zip(zarray_meta['shape'], zarray_meta['chunks']))
+        self._chunk_block_map = numpy.frombuffer(
+            ctx.load_block(chunk_block_map_index, by_index=True), dtype='int32').reshape(cdata_shape)
+
+        # claim the bock used for the map
+        self._ctx.claim_block(chunk_block_map_index, id(self))
+
+        # reorganize the map into a set and claim the block indices
+        self._chunk_block_map_keys = set()
+        for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
+            coord = tuple(coord)
+            block_index = int(self._chunk_block_map[coord])
+            chunk_key = self._sep.join((str(c) for c in tuple(coord)))
+            self._ctx.claim_block(block_index, (id(self), chunk_key))
+            self._chunk_block_map_keys.add(chunk_key)
+
         # TODO for updates to zarr
         # arrays that require addition of new chunks (or perhaps even
         # overwriting existing chunks) a system for adding blocks
@@ -75,15 +99,10 @@ class InternalStore(zarr.storage.Store):
     def _coords(self, key):
         return tuple([int(sk) for sk in self._sep_key(key)])
 
-    def _key_to_block_index(self, key):
-        coords = self._coords(key)
-        return int(self._chunk_block_map[coords])
-
     def __getitem__(self, key):
-        index = self._key_to_block_index(key)
-        if index == MISSING_CHUNK:
+        if key not in self._chunk_block_map_keys:
             return None
-        return self._ctx.load_block(index)
+        return self._ctx.load_block((id(self), key))
 
     def __setitem__(self, key, value):
         raise NotImplementedError("writing to InternalStore not yet supported")
@@ -92,19 +111,13 @@ class InternalStore(zarr.storage.Store):
         raise NotImplementedError("deleting chunks in InternalStore not yet supported")
 
     def __iter__(self):
-        for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
-            coord = tuple(coord)
-            yield self._sep.join((str(c) for c in coord))
+        yield from self._chunk_block_map_keys
 
     def __len__(self):
-        return numpy.count_nonzero(self._chunk_block_map != MISSING_CHUNK)
+        return len(self._chunk_block_map_keys)
 
     def listdir(self, path):
         # allows efficient zarr.storage.listdir
         if path:
             raise NotImplementedError("path argument not supported by InternalStore.listdir")
         return list(self)
-
-
-def _build_internal_store(zarray_meta, chunk_block_map, ctx, sep):
-    return InternalStore(chunk_block_map, ctx, sep)
