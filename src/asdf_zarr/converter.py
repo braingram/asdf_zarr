@@ -121,7 +121,7 @@ class ZarrConverter(asdf.extension.Converter):
             meta_store = obj.store
             chunk_store = obj.store
 
-        storage_settings = ctx.get_block_storage_settings(id(obj))
+        storage_settings = ctx.get_block_storage_settings(id(chunk_store))
         if storage_settings is None:  # guess storage
             if isinstance(
                     chunk_store, (
@@ -131,5 +131,5 @@ class ZarrConverter(asdf.extension.Converter):
                         storage.InternalStore,
                     )):
                 storage_settings = "internal"
-                ctx.set_block_storage_settings(id(obj), storage_settings)
+                ctx.set_block_storage_settings(id(chunk_store), storage_settings)
         return storage_settings

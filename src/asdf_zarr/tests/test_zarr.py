@@ -93,7 +93,7 @@ def test_raise_on_unsupported(store_type):
     tree = {'arr': arr}
     with pytest.raises(NotImplementedError):
         af = asdf.AsdfFile(tree)
-        af.set_block_storage(arr, 'external')
+        af.set_block_storage(arr.chunk_store, 'external')
         af.validate()
 
 
@@ -178,8 +178,8 @@ def test_convert_to_internal(tmp_path, compression, store_type):
     # internal storage is assumed
     # so the initial validate will pass
     af = asdf.AsdfFile(tree)
-    af.set_block_storage(arr1, 'internal')
-    af.set_block_storage(arr2, 'internal')
+    af.set_block_storage(arr1.chunk_store, 'internal')
+    af.set_block_storage(arr2.chunk_store, 'internal')
 
     fn = tmp_path / 'test.asdf'
     fn2 = tmp_path / 'test2.asdf'
