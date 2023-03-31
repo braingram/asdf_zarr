@@ -61,7 +61,6 @@ class InternalStore(zarr.storage.Store):
         super().__init__()
 
 
-        self._ctx = ctx
         self._sep = zarray_meta.get('dimension_separator', '.')
 
         # the chunk_block_map contains block indicies
@@ -75,7 +74,7 @@ class InternalStore(zarr.storage.Store):
             ctx.load_block(chunk_block_map_index, by_index=True), dtype='int32').reshape(cdata_shape)
 
         # claim the bock used for the map
-        self._ctx.claim_block(chunk_block_map_index, id(self))
+        ctx.claim_block(chunk_block_map_index, id(self))
 
         # reorganize the map into a set and claim the block indices
         #self._chunk_block_map_keys = set()
@@ -84,8 +83,8 @@ class InternalStore(zarr.storage.Store):
             coord = tuple(coord)
             block_index = int(self._chunk_block_map[coord])
             chunk_key = self._sep.join((str(c) for c in tuple(coord)))
-            self._ctx.claim_block(block_index, (id(self), chunk_key))
-            self._chunk_callbacks[chunk_key] = self._ctx.get_block_data_callback(block_index)
+            ctx.claim_block(block_index, (id(self), chunk_key))
+            self._chunk_callbacks[chunk_key] = ctx.get_block_data_callback(block_index)
             #self._chunk_block_map_keys.add(chunk_key)
 
         # TODO for updates to zarr
@@ -103,9 +102,6 @@ class InternalStore(zarr.storage.Store):
 
     def __getitem__(self, key):
         return self._chunk_callbacks.get(key, None)
-        #if key not in self._chunk_block_map_keys:
-        #    return None
-        #return self._ctx.load_block((id(self), key))
 
     def __setitem__(self, key, value):
         raise NotImplementedError("writing to InternalStore not yet supported")
