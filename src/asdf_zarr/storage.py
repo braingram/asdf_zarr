@@ -78,13 +78,15 @@ class InternalStore(zarr.storage.Store):
         self._ctx.claim_block(chunk_block_map_index, id(self))
 
         # reorganize the map into a set and claim the block indices
-        self._chunk_block_map_keys = set()
+        #self._chunk_block_map_keys = set()
+        self._chunk_callbacks = {}
         for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
             coord = tuple(coord)
             block_index = int(self._chunk_block_map[coord])
             chunk_key = self._sep.join((str(c) for c in tuple(coord)))
             self._ctx.claim_block(block_index, (id(self), chunk_key))
-            self._chunk_block_map_keys.add(chunk_key)
+            self._chunk_callbacks[chunk_key] = self._ctx.get_block_data_callback(block_index)
+            #self._chunk_block_map_keys.add(chunk_key)
 
         # TODO for updates to zarr
         # arrays that require addition of new chunks (or perhaps even
@@ -100,9 +102,10 @@ class InternalStore(zarr.storage.Store):
         return tuple([int(sk) for sk in self._sep_key(key)])
 
     def __getitem__(self, key):
-        if key not in self._chunk_block_map_keys:
-            return None
-        return self._ctx.load_block((id(self), key))
+        return self._chunk_callbacks.get(key, None)
+        #if key not in self._chunk_block_map_keys:
+        #    return None
+        #return self._ctx.load_block((id(self), key))
 
     def __setitem__(self, key, value):
         raise NotImplementedError("writing to InternalStore not yet supported")
@@ -111,10 +114,12 @@ class InternalStore(zarr.storage.Store):
         raise NotImplementedError("deleting chunks in InternalStore not yet supported")
 
     def __iter__(self):
-        yield from self._chunk_block_map_keys
+        yield from self._chunk_callbacks
+        #yield from self._chunk_block_map_keys
 
     def __len__(self):
-        return len(self._chunk_block_map_keys)
+        yield len(self._chunk_callbacks)
+        #return len(self._chunk_block_map_keys)
 
     def listdir(self, path):
         # allows efficient zarr.storage.listdir

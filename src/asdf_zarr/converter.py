@@ -30,12 +30,12 @@ class ZarrConverter(asdf.extension.Converter):
                 key = (id(obj.chunk_store), chunk_key)
                 data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
                 block_index = ctx.find_block_index(key, data_callback)
-                ctx.claim_block(block_index, key)
+                ctx.assign_block_key(block_index, key)
                 chunk_key_block_index_map[chunk_key] = block_index
             obj_dict['chunk_block_map'] = ctx.find_block_index(
                 id(obj.chunk_store),
                 storage._generate_chunk_map_callback(obj, chunk_key_block_index_map))
-            ctx.claim_block(obj_dict['chunk_block_map'], id(obj))
+            ctx.assign_block_key(obj_dict['chunk_block_map'], id(obj))
             return obj_dict
 
         if obj.chunk_store is not None:
@@ -71,18 +71,6 @@ class ZarrConverter(asdf.extension.Converter):
             chunk_block_map_index = node['chunk_block_map']
 
             chunk_store = storage.InternalStore(ctx, chunk_block_map_index, zarray_meta)
-
-            #    zarray_meta,
-            #    chunk_block_map,
-            #    ctx,
-            #    node['.zarray'].get('dimension_separator', '.'),
-            #)
-            # # now that we have an object, claim the blocks
-            # # use id(chunk_store) in case this is used for multiple zarr arrays
-            # ctx.claim_block(chunk_block_map_index, id(chunk_store))
-            # for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-            #     block_index = chunk_store._key_to_block_index(chunk_key)
-            #     ctx.claim_block(block_index, (id(chunk_store), chunk_key))
 
             # TODO read/write mode here
             obj = zarr.open_array(store=store, chunk_store=chunk_store)
@@ -121,7 +109,8 @@ class ZarrConverter(asdf.extension.Converter):
             meta_store = obj.store
             chunk_store = obj.store
 
-        storage_settings = ctx.get_block_storage_settings(id(chunk_store))
+        #storage_settings = ctx.get_block_storage_settings(id(chunk_store))
+        storage_settings = None
         if storage_settings is None:  # guess storage
             if isinstance(
                     chunk_store, (
