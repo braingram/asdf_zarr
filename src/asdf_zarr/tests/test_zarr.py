@@ -83,20 +83,6 @@ class CustomStore(zarr.storage.Store, UserDict):
     pass
 
 
-@pytest.mark.parametrize("store_type", [KVStore, MemoryStore, TempStore, CustomStore])
-def test_raise_on_unsupported(store_type):
-    if store_type is KVStore:
-        store = store_type({})
-    else:
-        store = store_type()
-    arr = create_zarray(store=store)
-    tree = {'arr': arr}
-    with pytest.raises(NotImplementedError):
-        af = asdf.AsdfFile(tree)
-        af.set_block_storage(arr.chunk_store, 'external')
-        af.validate()
-
-
 @pytest.mark.skip("ASDF Converters aren't aware of the open mode")
 @pytest.mark.parametrize("mode", ["r", "rw"])
 def test_open_mode(tmp_path, mode):
@@ -173,13 +159,18 @@ def test_convert_to_internal(tmp_path, compression, store_type):
     arr1 = create_zarray(store=store1)
     arr2 = create_zarray(store=store2)
     arr2[:] = arr2[:] * -2
-    tree = {'arr1': arr1, 'arr2': arr2}
 
-    # internal storage is assumed
-    # so the initial validate will pass
+    # now make arrays that will be converted to internal storage
+    if store_type in (KVStore, MemoryStore):
+        # these should be automatic
+        tree = {'arr1': arr1, 'arr2': arr2}
+    else:
+        tree = {
+            'arr1': asdf_zarr.storage.to_internal(arr1),
+            'arr2': asdf_zarr.storage.to_internal(arr2),
+        }
+
     af = asdf.AsdfFile(tree)
-    af.set_block_storage(arr1.chunk_store, 'internal')
-    af.set_block_storage(arr2.chunk_store, 'internal')
 
     fn = tmp_path / 'test.asdf'
     fn2 = tmp_path / 'test2.asdf'
