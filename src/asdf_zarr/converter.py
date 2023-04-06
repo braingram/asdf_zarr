@@ -16,7 +16,9 @@ class ZarrConverter(asdf.extension.Converter):
     types = ["zarr.core.Array"]
 
     def to_yaml_tree(self, obj, tag, ctx):
-        storage_settings = self._get_storage_settings(obj, tag, ctx)
+        storage_settings = ctx.get_array_storage(obj)
+        breakpoint()
+
         if storage_settings == "internal":
             # TODO should we enforce no zarr compression here?
             # include data from this zarr array in the asdf file
@@ -24,18 +26,20 @@ class ZarrConverter(asdf.extension.Converter):
             meta = json.loads(obj.store['.zarray'])
             obj_dict = {}
             obj_dict['.zarray'] = meta
+            chunk_store = obj.chunk_store or obj.store
             # update callbacks
             chunk_key_block_index_map = {}
             for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-                key = (id(obj.chunk_store), chunk_key)
                 data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
-                block_index = ctx.find_block_index(key, data_callback)
-                ctx.assign_block_key(block_index, key)
+                if hasattr(chunk_store, '_chunk_asdf_key'):
+                    asdf_key = chunk_store._chunk_asdf_key[chunk_key]
+                else:
+                    asdf_key = asdf.util.BlockKey(obj)
+                block_index = ctx.find_block_index(asdf_key, data_callback)
                 chunk_key_block_index_map[chunk_key] = block_index
             obj_dict['chunk_block_map'] = ctx.find_block_index(
-                id(obj.chunk_store),
+                chunk_store,
                 storage._generate_chunk_map_callback(obj, chunk_key_block_index_map))
-            ctx.assign_block_key(obj_dict['chunk_block_map'], id(obj))
             return obj_dict
 
         if obj.chunk_store is not None:
@@ -74,6 +78,9 @@ class ZarrConverter(asdf.extension.Converter):
 
             # TODO read/write mode here
             obj = zarr.open_array(store=store, chunk_store=chunk_store)
+            # now that we have an object, assign the block keys
+            chunk_store._assign_block_keys(obj, ctx)
+            ctx.set_array_storage(obj, "internal")
             return obj
 
         chunk_store = util.decode_storage(node['store'])
@@ -84,21 +91,8 @@ class ZarrConverter(asdf.extension.Converter):
             store = chunk_store
         # TODO mode, version, path_str?
         obj = zarr.open(store=store, chunk_store=chunk_store)
+        ctx.set_array_storage(obj, "external")
         return obj
-
-    def reserve_blocks(self, obj, tag, ctx):
-        storage_settings = self._get_storage_settings(obj, tag, ctx)
-
-        if storage_settings != "internal":
-            return []
-
-        # if we're using internal storage, return keys for
-        # the chunk_block_map
-        keys = [id(obj), ]
-        # all initialized chunks
-        for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-            keys.append((id(obj.chunk_store), chunk_key))
-        return keys
 
     def _get_storage_settings(self, obj, tag, ctx):
         if obj.chunk_store is not None:
@@ -109,16 +103,20 @@ class ZarrConverter(asdf.extension.Converter):
             meta_store = obj.store
             chunk_store = obj.store
 
-        #storage_settings = ctx.get_block_storage_settings(id(chunk_store))
-        storage_settings = None
-        if storage_settings is None:  # guess storage
-            if isinstance(
-                    chunk_store, (
-                        zarr.storage.KVStore,
-                        zarr.storage.MemoryStore,
-                        zarr.storage.TempStore,
-                        storage.InternalStore,
-                    )):
-                storage_settings = "internal"
-                ctx.set_block_storage_settings(id(chunk_store), storage_settings)
-        return storage_settings
+        # ignore compression for now
+        # currently, this creates a block for the chunk_store, that's ok we'll
+        # use that for the map
+        array_storage = ctx.get_array_storage(obj)
+        # using these options the default is now internal
+        #storage_settings = None
+        #if storage_settings is None:  # guess storage
+        #    if isinstance(
+        #            chunk_store, (
+        #                zarr.storage.KVStore,
+        #                zarr.storage.MemoryStore,
+        #                zarr.storage.TempStore,
+        #                storage.InternalStore,
+        #            )):
+        #        storage_settings = "internal"
+        #        ctx.set_block_storage_settings(_get_obj_key(chunk_store), storage_settings)
+        return array_storage

@@ -40,6 +40,8 @@ def test_write_to(tmp_path, copy_arrays, lazy_load, compression, store_type):
 
     fn = tmp_path / 'test.asdf'
     af = asdf.AsdfFile(tree)
+    af.set_array_storage(arr1, "external")
+    af.set_array_storage(arr2, "external")
     af.write_to(fn, all_array_compression=compression)
 
     with asdf.open(fn, mode='r', copy_arrays=copy_arrays, lazy_load=lazy_load) as af:
@@ -93,7 +95,7 @@ def test_raise_on_unsupported(store_type):
     tree = {'arr': arr}
     with pytest.raises(NotImplementedError):
         af = asdf.AsdfFile(tree)
-        af.set_block_storage(arr.chunk_store, 'external')
+        af.set_array_storage(arr.chunk_store, 'external')
         af.validate()
 
 

@@ -1,6 +1,8 @@
 import json
 import math
+import uuid
 
+import asdf
 import numpy
 import zarr
 
@@ -60,6 +62,7 @@ class InternalStore(zarr.storage.Store):
     def __init__(self, ctx, chunk_block_map_index, zarray_meta):
         super().__init__()
 
+        self._asdf_key = uuid.uuid4()
 
         self._sep = zarray_meta.get('dimension_separator', '.')
 
@@ -70,27 +73,39 @@ class InternalStore(zarr.storage.Store):
         # 4 x 5
         cdata_shape = tuple(math.ceil(s / c)
                      for s, c in zip(zarray_meta['shape'], zarray_meta['chunks']))
+        self._chunk_block_map_index = chunk_block_map_index
         self._chunk_block_map = numpy.frombuffer(
-            ctx.load_block(chunk_block_map_index, by_index=True), dtype='int32').reshape(cdata_shape)
+            ctx.get_block_data_callback(chunk_block_map_index)(),
+            dtype='int32').reshape(cdata_shape)
 
         # claim the bock used for the map
-        ctx.claim_block(chunk_block_map_index, id(self))
+        ctx.assign_block_key(chunk_block_map_index, self)
 
         # reorganize the map into a set and claim the block indices
         #self._chunk_block_map_keys = set()
         self._chunk_callbacks = {}
+        self._chunk_block_indices = {}
         for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
             coord = tuple(coord)
             block_index = int(self._chunk_block_map[coord])
             chunk_key = self._sep.join((str(c) for c in tuple(coord)))
-            ctx.claim_block(block_index, (id(self), chunk_key))
+            # need to generate a key using this chunk key and the store object
             self._chunk_callbacks[chunk_key] = ctx.get_block_data_callback(block_index)
+            self._chunk_block_indices[chunk_key] = block_index
             #self._chunk_block_map_keys.add(chunk_key)
 
         # TODO for updates to zarr
         # arrays that require addition of new chunks (or perhaps even
         # overwriting existing chunks) a system for adding blocks
         # on top of those already reserved is needed.
+
+    def _assign_block_keys(self, obj, ctx):
+        ctx.assign_block_key(self._chunk_block_map_index, obj)
+        self._chunk_asdf_keys = {}
+        for chunk_key, block_index in self._chunk_block_indices.items():
+            asdf_key = asdf.util.BlockKey(obj)
+            self._chunk_asdf_keys[chunk_key] = asdf_key
+            ctx.assign_block_key(block_index, asdf_key)
 
     def _sep_key(self, key):
         if self._sep is None:
