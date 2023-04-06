@@ -16,8 +16,11 @@ class ZarrConverter(asdf.extension.Converter):
     types = ["zarr.core.Array"]
 
     def to_yaml_tree(self, obj, tag, ctx):
-        storage_settings = self._get_storage_settings(obj, tag, ctx)
-        if storage_settings == "internal":
+        # TODO how to trigger ingestion? Should I force the user
+        # to explicitly make an InternalStore? I think this would work.
+        # it would first have no blocks but only use temp files/the source
+        # store
+        if isinstance(obj.chunk_store, storage.InternalStore):
             # TODO should we enforce no zarr compression here?
             # include data from this zarr array in the asdf file
             # include the meta data in the tree
@@ -27,15 +30,16 @@ class ZarrConverter(asdf.extension.Converter):
             # update callbacks
             chunk_key_block_index_map = {}
             for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-                key = (id(obj.chunk_store), chunk_key)
                 data_callback = storage._generate_chunk_data_callback(obj, chunk_key)
-                block_index = ctx.find_block_index(key, data_callback)
-                ctx.assign_block_key(block_index, key)
+                asdf_key = obj.chunk_store._asdf_keys.get(chunk_key, asdf.util.BlockKey())
+                block_index = ctx.find_block_index(asdf_key, data_callback)
                 chunk_key_block_index_map[chunk_key] = block_index
+            asdf_key = obj.chunk_store._chunk_block_map_asdf_key
+            if asdf_key is None:
+                asdf_key = asdf.util.BlockKey()
             obj_dict['chunk_block_map'] = ctx.find_block_index(
-                id(obj.chunk_store),
+                asdf_key,
                 storage._generate_chunk_map_callback(obj, chunk_key_block_index_map))
-            ctx.assign_block_key(obj_dict['chunk_block_map'], id(obj))
             return obj_dict
 
         if obj.chunk_store is not None:
@@ -87,18 +91,11 @@ class ZarrConverter(asdf.extension.Converter):
         return obj
 
     def reserve_blocks(self, obj, tag, ctx):
-        storage_settings = self._get_storage_settings(obj, tag, ctx)
-
-        if storage_settings != "internal":
+        # if this block uses a 'InternalStore' it uses blocks
+        if not isinstance(obj.chunk_store, storage.InternalStore):
             return []
 
-        # if we're using internal storage, return keys for
-        # the chunk_block_map
-        keys = [id(obj), ]
-        # all initialized chunks
-        for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
-            keys.append((id(obj.chunk_store), chunk_key))
-        return keys
+        return obj.chunk_store._asdf_keys
 
     def _get_storage_settings(self, obj, tag, ctx):
         if obj.chunk_store is not None:
