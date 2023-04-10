@@ -146,7 +146,6 @@ class ReadInternalStore(InternalStore):
         self._chunk_block_map_asdf_key = None
 
         # reorganize the map into a set and claim the block indices
-        #self._chunk_block_map_keys = set()
         self._chunk_callbacks = {}
         self._chunk_asdf_keys = {}
         for coord in numpy.transpose(numpy.nonzero(self._chunk_block_map != MISSING_CHUNK)):
@@ -157,12 +156,6 @@ class ReadInternalStore(InternalStore):
             self._chunk_asdf_keys[chunk_key] = asdf_key
             ctx.assign_block_key(block_index, asdf_key)
             self._chunk_callbacks[chunk_key] = ctx.get_block_data_callback(block_index)
-            #self._chunk_block_map_keys.add(chunk_key)
-
-        # TODO for updates to zarr
-        # arrays that require addition of new chunks (or perhaps even
-        # overwriting existing chunks) a system for adding blocks
-        # on top of those already reserved is needed.
 
     def _sep_key(self, key):
         if self._sep is None:
