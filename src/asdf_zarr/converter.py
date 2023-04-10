@@ -16,20 +16,19 @@ class ZarrConverter(asdf.extension.Converter):
     types = ["zarr.core.Array"]
 
     def to_yaml_tree(self, obj, tag, ctx):
-        # TODO how to trigger ingestion? Should I force the user
-        # to explicitly make an InternalStore? I think this would work.
-        # it would first have no blocks but only use temp files/the source
-        # store
-        chunk_store = obj.chunk_store or store
+        chunk_store = obj.chunk_store or obj.store
+        # these storage types require conversion to an internal store so make it the default
         if isinstance(chunk_store, (zarr.storage.KVStore, zarr.storage.MemoryStore, zarr.storage.TempStore)):
             chunk_store = storage.ConvertedInternalStore(chunk_store)
         if isinstance(chunk_store, storage.InternalStore):
             # TODO should we enforce no zarr compression here?
             # include data from this zarr array in the asdf file
-            # include the meta data in the tree
             meta = json.loads(obj.store['.zarray'])
             obj_dict = {}
+
+            # include the meta data in the tree
             obj_dict['.zarray'] = meta
+
             # update callbacks
             chunk_key_block_index_map = {}
             for chunk_key in storage._iter_chunk_keys(obj, only_initialized=True):
@@ -63,8 +62,10 @@ class ZarrConverter(asdf.extension.Converter):
         if '.zarray' in node and 'chunk_block_map' in node:
             # this is an internally stored zarr array
             # TODO should we enforce no zarr compression here?
+
             # load the meta data into memory
             store = zarr.storage.KVStore({'.zarray': json.dumps(node['.zarray'])})
+
             # setup an InternalStore to read block data (when requested)
             zarray_meta = node['.zarray']
             chunk_block_map_index = node['chunk_block_map']
@@ -86,10 +87,10 @@ class ZarrConverter(asdf.extension.Converter):
         return obj
 
     def reserve_blocks(self, obj, tag, ctx):
-        # if this block uses a 'InternalStore' it uses blocks
         if not isinstance(obj.chunk_store, storage.InternalStore):
             return []
 
+        # if this block uses a 'InternalStore' it uses blocks
         keys = list(obj.chunk_store._chunk_asdf_keys.keys())
         if obj.chunk_store._chunk_block_map_asdf_key is not None:
             keys.append(obj._chunk_block_map_asdf_key)

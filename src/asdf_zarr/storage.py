@@ -12,9 +12,6 @@ MISSING_CHUNK = -1
 def _iter_chunk_keys(zarray, only_initialized=False):
     """Using zarray metadata iterate over chunk keys"""
     if only_initialized:
-        # TODO this does not work for NestedDirectoryStore
-        #if isinstance(zarray.chunk_store, zarr.storage.NestedDirectoryStore):
-        #    raise NotImplementedError("zarr.storage.NestedDirectoryStore is not supported")
         for k in zarr.storage.listdir(zarray.chunk_store):
             if k == '.zarray':
                 continue
@@ -68,6 +65,42 @@ def to_internal(zarray):
 class InternalStore(zarr.storage.Store):
     def __init__(self):
         super().__init__()
+        self._tmp_store_ = None
+        self._deleted_keys = set()
+
+    @property
+    def _tmp_store(self):
+        if self._tmp_store_ is None:
+            # TODO options to control where TempStore is stored
+            self._tmp_store_ = zarr.storage.TempStore()
+        return self._tmp_store_
+
+    def __setitem__(self, key, value):
+        if key in self._deleted_keys:
+            self._deleted_keys.remove(key)
+        self._tmp_store[key] = value
+
+    def __delitem__(self, key):
+        self._deleted_keys.add(key)
+
+    def __len__(self):
+        return len(set(self.__iter__()))
+
+    def listdir(self, path):
+        if path:
+            raise NotImplementedError("path argument not supported by InternalStore.listdir")
+        return list(self.__iter__())
+
+    def __getitem__(self, key):
+        if key in self._deleted_keys or self._tmp_store_ is None:
+            raise KeyError(f"{key}")
+        return self._tmp_store.__getitem__(key)
+
+    def __iter__(self):
+        keys = set()
+        if self._tmp_store_ is not None:
+            keys = keys.union(set(self._tmp_store.__iter__()))
+        return iter(keys.difference(self._deleted_keys))
 
 
 class ConvertedInternalStore(InternalStore):
@@ -78,22 +111,18 @@ class ConvertedInternalStore(InternalStore):
         self._chunk_block_map_asdf_key = None
 
     def __getitem__(self, key):
+        if key in self._deleted_keys:
+            raise KeyError(f"{key}")
+        try:
+            return super().__getitem__(key)
+        except KeyError:
+            pass
         return self._existing_store.__getitem__(key)
 
-    def __setitem__(self, key, value):
-        raise NotImplementedError("writing to InternalStore not yet supported")
-
-    def __delitem__(self, key):
-        raise NotImplementedError("deleting chunks in InternalStore not yet supported")
-
     def __iter__(self):
-        return self._existing_store.__iter__()
-
-    def __len__(self):
-        return self._existing_store.__len__()
-
-    def listdir(self, path):
-        return self._existing_store.listdir(path)
+        keys = set(super().__iter__())
+        keys = keys.union(set(self._existing_store.__iter__()))
+        return iter(keys.difference(self._deleted_keys))
 
 
 class ReadInternalStore(InternalStore):
@@ -144,23 +173,17 @@ class ReadInternalStore(InternalStore):
         return tuple([int(sk) for sk in self._sep_key(key)])
 
     def __getitem__(self, key):
+        if key in self._deleted_keys:
+            raise KeyError(f"{key}")
+        try:
+            return super().__getitem__(key)
+        except KeyError:
+            pass
+        if key not in self._chunk_callbacks:
+            raise KeyError(f"{key}")
         return self._chunk_callbacks.get(key, None)()
 
-    def __setitem__(self, key, value):
-        raise NotImplementedError("writing to InternalStore not yet supported")
-
-    def __delitem__(self, key):
-        raise NotImplementedError("deleting chunks in InternalStore not yet supported")
-
     def __iter__(self):
-        yield from self._chunk_callbacks
-        #yield from self._chunk_block_map_keys
-
-    def __len__(self):
-        return len(self._chunk_callbacks)
-
-    def listdir(self, path):
-        # allows efficient zarr.storage.listdir
-        if path:
-            raise NotImplementedError("path argument not supported by InternalStore.listdir")
-        return list(self)
+        keys = set(super().__iter__())
+        keys = keys.union(set(self._chunk_callbacks))
+        return iter(keys.difference(self._deleted_keys))

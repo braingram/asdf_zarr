@@ -193,6 +193,57 @@ def test_convert_to_internal(tmp_path, compression, store_type):
             assert not numpy.allclose(af[n], a), (af[n][:], a[:])
 
 
+def test_modify_internal(tmp_path):
+    # setup to convert a zarray to internal
+    store1 = KVStore({})
+    store2 = KVStore({})
+    arr1 = create_zarray(store1)
+    arr2 = create_zarray(store2)
+
+    arr1[:] = 1
+    arr2[:] = 2
+
+    tree = {
+        'arr1': asdf_zarr.storage.to_internal(arr1),
+        'arr2': asdf_zarr.storage.to_internal(arr2),
+    }
+
+    af = asdf.AsdfFile(tree)
+
+    # modify post-setup (should not change original store)
+    af['arr1'][0, 0] = 2
+    af['arr2'][0, 0] = 4
+    assert arr1[0, 0] == 1
+    assert arr2[0, 0] == 2
+    assert af['arr1'][0, 0] == 2
+    assert af['arr2'][0, 0] == 4
+
+    # save to internal
+    fn = tmp_path / 'test.asdf'
+    fn2 = tmp_path / 'test2.asdf'
+    af.write_to(fn)
+
+    # open internal
+    with asdf.open(fn) as af:
+        assert af['arr1'][0, 0] == 2
+        assert af['arr2'][0, 0] == 4
+
+        # modify
+        af['arr1'][0, 0] = 10
+        af['arr2'][0, 0] = 20
+
+        # resave
+        af.write_to(fn2)
+
+    # check all saved data is correct
+    with asdf.open(fn) as af:
+        assert af['arr1'][0, 0] == 2
+        assert af['arr2'][0, 0] == 4
+    with asdf.open(fn2) as af:
+        assert af['arr1'][0, 0] == 10
+        assert af['arr2'][0, 0] == 20
+
+
 @pytest.mark.skip("Not Implemented")
 def test_warn_when_copy():
     # warn if a file with internal blocks is loaded with copy_arrays
